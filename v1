@@ -1,0 +1,392 @@
+
+
+
+
+Network Working Group                                       Ravindranath
+Internet-Draft                                                   Inamdar
+Intended status: Informational                                 Salgueiro
+Expires: December 11, 2016                           Cisco Systems, Inc.
+                                                            June 9, 2016
+
+
+               Using Multipath RTP(MPRTP) with DTLS-SRTP
+                      draft-xxx-mprtp-dtls-srtp-00
+
+Abstract
+
+   This document describes how Multipath RTP(MPRTP) works when a Secure
+   Real-Time Transport (SRTP) security context is set up with the
+   Datagram Transport Layer Security (DTLS) protocol.
+
+Status of This Memo
+
+   This Internet-Draft is submitted in full conformance with the
+   provisions of BCP 78 and BCP 79.
+
+   Internet-Drafts are working documents of the Internet Engineering
+   Task Force (IETF).  Note that other groups may also distribute
+   working documents as Internet-Drafts.  The list of current Internet-
+   Drafts is at http://datatracker.ietf.org/drafts/current/.
+
+   Internet-Drafts are draft documents valid for a maximum of six months
+   and may be updated, replaced, or obsoleted by other documents at any
+   time.  It is inappropriate to use Internet-Drafts as reference
+   material or to cite them other than as "work in progress."
+
+   This Internet-Draft will expire on December 11, 2016.
+
+Copyright Notice
+
+   Copyright (c) 2016 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+   This document is subject to BCP 78 and the IETF Trust's Legal
+   Provisions Relating to IETF Documents
+   (http://trustee.ietf.org/license-info) in effect on the date of
+   publication of this document.  Please review these documents
+   carefully, as they describe your rights and restrictions with respect
+   to this document.  Code Components extracted from this document must
+   include Simplified BSD License text as described in Section 4.e of
+   the Trust Legal Provisions and are provided without warranty as
+   described in the Simplified BSD License.
+
+
+
+
+Ravindranath, et al.    Expires December 11, 2016               [Page 1]
+
+Internet-Draft           Multipath RTP with SRTP               June 2016
+
+
+Table of Contents
+
+   1.  Introduction  . . . . . . . . . . . . . . . . . . . . . . . .   2
+   2.  Motivation  . . . . . . . . . . . . . . . . . . . . . . . . .   3
+   3.  Using MPRTP with DTLS-SRTP  . . . . . . . . . . . . . . . . .   3
+     3.1.  Setting up the Initial Subflow  . . . . . . . . . . . . .   3
+     3.2.  Adding Additional Subflows  . . . . . . . . . . . . . . .   4
+     3.3.  Removing a Subflow  . . . . . . . . . . . . . . . . . . .   5
+     3.4.  Midcall Considerations  . . . . . . . . . . . . . . . . .   5
+   4.  Security Considerations . . . . . . . . . . . . . . . . . . .   5
+   5.  Acknowledgements  . . . . . . . . . . . . . . . . . . . . . .   5
+   6.  Normative References  . . . . . . . . . . . . . . . . . . . .   5
+   Authors' Addresses  . . . . . . . . . . . . . . . . . . . . . . .   6
+
+1.  Introduction
+
+   [I-D.ietf-avtcore-mprtp] is an extension to RTP that allows multi
+   homed endpoints to use a plurality of transmission paths to send/
+   receive media.
+
+   It involves splitting of a single RTP stream into multiple sub flows
+   for transmission.  Each sub flow is a well formed RTP stream from the
+   network perspective with it's own Subflow ID and Subflow-specific
+   Sequence Number.  Sub flows might be active or passive depending on
+   whether or not they actively participate in media transmission.
+   Architecturally the MPRTP stack is a layer of a abstraction between
+   the application that sends RTP packets and the plurality of paths for
+   media transmission and is responsible for splitting and recombination
+   of the RTP stream.  RTCP reports are exchanged per sub flow to
+   account for variations in per path characteristics and are
+   multiplexed on the same port as RTP.  The sub flow specific RTCP
+   reports can be used by the MPRTP staack for path feedback , scheduling
+   and load balancing.
+
+   Datagram Transport Layer Security (DTLS) [RFC4347] is a channel
+   security protocol that offers integrated key management, parameter
+   negotiation, and secure data transfer.  Because DTLS data transfer
+   protocol is generic, it is less highly optimized for use with RTP
+   than is SRTP, which has been specifically tuned for that purpose ,
+   DTLS-SRTP [RFC5764] is an extension to DTLS that is optimized to work
+   with Secure Real Time transport protocol [RFC3711] to provide
+   integrated key management, SRTP algorithm negotiation and SRTP
+   parameter negotiation.
+
+   DTLS-SRTP is defined for point to point media sessions, wherein a
+   DTLS association is setup between the two participants on the same
+   ports used to exchange media.  Each DTLS-SRTP session contains a
+   single DTLS association and either two SRTP contexts (if media
+
+
+
+Ravindranath, et al.    Expires December 11, 2016               [Page 2]
+
+Internet-Draft           Multipath RTP with SRTP               June 2016
+
+
+   traffic is flowing in both directions on the same host/port quartet)
+   or one SRTP context (if media traffic is only flowing in one
+   direction).  All SRTP traffic flowing over that pair in a given
+   direction uses a single SRTP context.  When RTP and RTCP are
+   multiplexed on the same port [RFC5761] the number of DTLS
+   associations would reduce be two.
+
+   When there are multiple media streams in a communication session, for
+   example an endpoint that transmits both audio and video, the
+   recommended approach as per [RFC5764] is to use "session resumption"
+   to reduce public key operations.
+
+2.  Motivation
+
+   When MPRTP[I-D.ietf-avtcore-mprtp] is used along with DTLS-SRTP there
+   will likely be multiple DTLS associations one for each 5-tuple.  This
+   document describes how the DTLS association can be optimized.
+
+3.  Using MPRTP with DTLS-SRTP
+
+   As discussed above MPRTP uses multiple sub flows to enable
+   transmission and receipt of media; the support for MPRTP by the
+   sender is signaled by including the "a=mprtp" attribute in the offer
+   , if the receiver is also MPRTP capable it includes the "a=mprtp"
+   attribute in the answer.Advertisement of interfaces can either be
+   done out-of-band (via SDP by explicitly listing the interfaces in the
+   initial offer or using an updated offer) or in-band ( via RTCP
+   extensions for MPRTP).
+
+   Regardless of whether in-band or out-of-band is used , the initial
+   offer/answer exchange contains the following in the SDP:
+
+   1.  Support for MPRTP via the a=mprtp attribute.
+
+   2.  The presence of the "fingerprint" and "setup" attributes as
+       defined in [RFC4572] and [RFC4145] respectively.
+
+3.1.  Setting up the Initial Subflow
+
+   The offerer includes the list of available interfaces(assuming there
+   is more than one interface available at session setup) ,the a=mprtp
+   attribute , the "fingerprint" attribute which corresponds to the
+   certificate that will be used during the DTLS handshake and the
+   "setup" attribute which is set to "actpass".  The advertised
+   interfaces are listed in decreasing order of priority and the host/
+   port pair specified for the first priority interface will form the
+   first half of the eventual host/port quartet that will be used to
+   exchange SRTP packets bidirectionally.
+
+
+
+Ravindranath, et al.    Expires December 11, 2016               [Page 3]
+
+Internet-Draft           Multipath RTP with SRTP               June 2016
+
+
+   The answerer replies with the fingerprint attribute , a=mprtp
+   attribute and the list of interfaces in decreasing order of priority
+   , the first preference interface IP Address and port will form the
+   host/port pair to setup the second half of the quartet used to
+   exchange SRTP packets bi-directionally.  The server responds with an
+   ACK, at this time there are 2 DLTS SRTP associations.  The salient
+   aspects SDP negotiation are highlighted below.
+
+
+   Offer:
+        v=0
+        o=alice 2890844526 2890844527 IN IP4 192.0.2.1
+        s=
+        c=IN IP4 192.0.2.1
+        a=fingerprint: SHA-1 \
+        4A:AD:B9:B1:3F:82:18:3B:54:02:12:DF:3E:5D:49:6B:19:E5:7C:AB
+        t=0 0
+        m=video 49170 RTP/AVP 98
+        a=rtpmap:98 H264/90000
+        a=fmtp:98 profile-level-id=42A01E;
+        a=rtcp-mux
+        a=mprtp interface:1 192.0.2.1:49170
+        a=mprtp interface:2 198.51.100.1:51372
+
+
+   Answer:
+        v=0
+        o=bob 2890844528 2890844529 IN IP4 192.0.2.2
+        s=
+        c=IN IP4 192.0.2.2
+        a=fingerprint: SHA-1 \
+        FF:FF:FF:B1:3F:82:18:3B:54:02:12:DF:3E:5D:49:6B:19:E5:7C:AB
+        t=0 0
+        m=video 4000 RTP/AVP 98
+        a=rtpmap:98 H264/90000
+        a=fmtp:98 profile-level-id=42A01E;
+        a=rtcp-mux
+        a=mprtp interface:1 192.0.2.2:4000
+
+
+                  The salient aspects of SDP negotiation
+
+3.2.  Adding Additional Subflows
+
+   Once the initial subflow is setup , there are two DTLS associations
+   that protect RTP and RTCP packets bidirectionally.  To protect
+   additional subflows , instead of establishing a new DTLS
+   association(complete with public key cryptography) , "session
+
+
+
+Ravindranath, et al.    Expires December 11, 2016               [Page 4]
+
+Internet-Draft           Multipath RTP with SRTP               June 2016
+
+
+   resumption" is used instead.  The creation of a new DTLS association
+   ( either with complete public key cryptography or session resumption)
+   leads to the creation of a new SRTP cryptographic context , however
+   since MPRTP is essentially the splitting of an RTP stream over a
+   plurality of subflows, co-ordination between the MPRTP, RTP, SRTP
+   stacks is required to associate multiple 5 tuples to a single
+   cryptographic context.
+
+3.3.  Removing a Subflow
+
+   During the course of the media session , interfaces may appear or
+   disappear , in either case the endpoint must be capable of
+   advertising the changes , either via SDP or RTCP.  When an interface
+   and by extension a subflow is no longer available and this is
+   communicated to the peer , the remaining subflows continue to utilize
+   the existing SRTP cryptographic context.  The crypto context will
+   continue to be referenced until the media session between the two
+   peers is active regardless of addition or removal of subflows.
+
+3.4.  Midcall Considerations
+
+   During a media session between peers , interactions can change
+   session characteristics , like codec for example.  If interactions
+   cause a change in session participants , via a call transfer for
+   example , existing cryptograhic contexts and DTLS associations must
+   be purged and new ones established between the communicating peers as
+   a result of a successful transfer.
+
+4.  Security Considerations
+
+   TBD
+
+5.  Acknowledgements
+
+6.  Normative References
+
+   [RFC4145]  Yon, D. and G. Camarillo, "TCP-Based Media Transport in
+              the Session Description Protocol (SDP)", RFC 4145,
+              DOI 10.17487/RFC4145, September 2005,
+              <http://www.rfc-editor.org/info/rfc4145>.
+
+   [RFC4347]  Rescorla, E. and N. Modadugu, "Datagram Transport Layer
+              Security", RFC 4347, DOI 10.17487/RFC4347, April 2006,
+              <http://www.rfc-editor.org/info/rfc4347>.
+
+
+
+
+
+
+
+Ravindranath, et al.    Expires December 11, 2016               [Page 5]
+
+Internet-Draft           Multipath RTP with SRTP               June 2016
+
+
+   [RFC4572]  Lennox, J., "Connection-Oriented Media Transport over the
+              Transport Layer Security (TLS) Protocol in the Session
+              Description Protocol (SDP)", RFC 4572,
+              DOI 10.17487/RFC4572, July 2006,
+              <http://www.rfc-editor.org/info/rfc4572>.
+
+   [RFC5764]  McGrew, D. and E. Rescorla, "Datagram Transport Layer
+              Security (DTLS) Extension to Establish Keys for the Secure
+              Real-time Transport Protocol (SRTP)", RFC 5764,
+              DOI 10.17487/RFC5764, May 2010,
+              <http://www.rfc-editor.org/info/rfc5764>.
+
+   [RFC3711]  Baugher, M., McGrew, D., Naslund, M., Carrara, E., and K.
+              Norrman, "The Secure Real-time Transport Protocol (SRTP)",
+              RFC 3711, DOI 10.17487/RFC3711, March 2004,
+              <http://www.rfc-editor.org/info/rfc3711>.
+
+   [RFC5761]  Perkins, C. and M. Westerlund, "Multiplexing RTP Data and
+              Control Packets on a Single Port", RFC 5761,
+              DOI 10.17487/RFC5761, April 2010,
+              <http://www.rfc-editor.org/info/rfc5761>.
+
+   [I-D.ietf-avtcore-mprtp]
+              Varun, V., Karkkainen, T., Ott, J., Ahsan, S., and L.
+              Eggert, "Multipath RTP (MPRTP)", draft-ietf-avtcore-
+              mprtp-02 (work in progress), March 2016.
+
+Authors' Addresses
+
+   Ram Mohan Ravindranath
+   Cisco Systems, Inc.
+   Cessna Business Park ,
+   Kadabeesanahalli Village, Varthur Hobli,
+   Sarjapur-Marathahalli Outer Ring Road
+   Bangalore, Karnataka  560103
+   India
+
+   Email: rmohanr@cisco.com
+
+
+
+
+
+
+
+
+
+
+
+
+
+Ravindranath, et al.    Expires December 11, 2016               [Page 6]
+
+Internet-Draft           Multipath RTP with SRTP               June 2016
+
+
+   Kaustubh Inamdar
+   Cisco Systems, Inc.
+   Cessna Business Park ,
+   Kadabeesanahalli Village, Varthur Hobli,
+   Sarjapur-Marathahalli Outer Ring Road
+   Bangalore, Karnataka  560103
+   India
+
+   Email: kinamdar@cisco.com
+
+
+   Gonzalo Salgueiro
+   Cisco Systems, Inc.
+   7200-12 Kit Creek Road ,
+   Research Triangle Park, NC  27709
+   US
+
+   Email: gsalguei@cisco.com
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Ravindranath, et al.    Expires December 11, 2016               [Page 7]
